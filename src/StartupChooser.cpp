@@ -743,6 +743,11 @@ bool ChooserRun(const std::string& startDirectory)
   int selected = 0;
   ChooserBackground background;
 
+#ifdef SDL2
+
+  int lastWindowWidth = -1;
+  int lastWindowHeight = -1;
+
   for (;;) {
     drawMenu(background, selected);
     SDL_Event event;
@@ -750,16 +755,41 @@ bool ChooserRun(const std::string& startDirectory)
     while (!gotKey) {
       SDL_Delay(10);
       while (SDL_PollEvent(&event)) {
+
         if (event.type == SDL_QUIT) {
           return false;
         }
+
+        if (event.type == SDL_WINDOWEVENT &&
+            (event.window.event == SDL_WINDOWEVENT_RESIZED ||
+             event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
+          if (event.window.data1 != lastWindowWidth ||
+              event.window.data2 != lastWindowHeight) {
+            lastWindowWidth = event.window.data1;
+            lastWindowHeight = event.window.data2;
+            break;
+          }
+          continue;
+        }
+
         if (event.type == SDL_KEYDOWN) {
           gotKey = true;
           break;
         }
       }
+
+      if (event.type == SDL_WINDOWEVENT &&
+          (event.window.event == SDL_WINDOWEVENT_RESIZED ||
+           event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) &&
+          !gotKey) {
+        break;
+      }
     }
-#ifdef SDL2
+
+    if (!gotKey) {
+      continue;
+    }
+
     const SDL_Keycode key = event.key.keysym.sym;
 
     if (key == SDLK_ESCAPE) {
@@ -814,6 +844,23 @@ bool ChooserRun(const std::string& startDirectory)
     }
 
 #else
+  for (;;) {
+    drawMenu(background, selected);
+    SDL_Event event;
+    bool gotKey = false;
+    while (!gotKey) {
+      SDL_Delay(10);
+      while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+          return false;
+        }
+        if (event.type == SDL_KEYDOWN) {
+          gotKey = true;
+          break;
+        }
+      }
+    }
+
     const SDLKey key = event.key.keysym.sym;
 
     if (key == SDLK_ESCAPE) {
