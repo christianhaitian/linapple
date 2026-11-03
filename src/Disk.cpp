@@ -410,7 +410,7 @@ void DiskInitialize()
 {
   int loop = DRIVES;
   while (loop--) {
-    ZeroMemory(&g_aFloppyDisk[loop], sizeof(Disk_t));
+    memset(&g_aFloppyDisk[loop], 0, sizeof(Disk_t));
   }
 }
 
@@ -483,7 +483,7 @@ int DiskInsert(int drive, LPCTSTR imageFileName, bool writeProtected, bool creat
   if (fptr->imagehandle) {
     RemoveDisk(drive);
   }
-  ZeroMemory(fptr, sizeof(Disk_t));
+  memset(fptr, 0, sizeof(Disk_t));
 
   // Let us deal with .gz files
   int lf = strlen(imageFileName);
@@ -510,7 +510,11 @@ int DiskInsert(int drive, LPCTSTR imageFileName, bool writeProtected, bool creat
     tmp = GetImageTitle(imageFileName, fptr);
     snprintf(s_title, MAX_DISK_IMAGE_NAME + 32, "%.*s - %.*s", int(strlen(g_pAppTitle)), g_pAppTitle, int(strlen(tmp)), tmp);
     if (drive == 0) {
+#ifdef SDL2
+      //SDL_SetWindowTitle(sdl2window, s_title);
+#else
       SDL_WM_SetCaption(s_title, g_pAppTitle);// change caption just for drive 0 (leading)
+#endif
     }
     printf("Disk is inserted. Full name = %s\n", imageFileName);
   } else {
@@ -835,8 +839,11 @@ bool DiskDriveSwap()
   memcpy(&g_aFloppyDisk[1], &temp, sizeof(Disk_t));
   // change title
   snprintf(s_title, MAX_DISK_IMAGE_NAME + 32, "%.*s - %.*s", int(strlen(g_pAppTitle)), g_pAppTitle, int(strlen(g_aFloppyDisk[0].imagename)), g_aFloppyDisk[0].imagename);
+#ifdef SDL2
+  //SDL_SetWindowTitle(sdl2window, s_title);
+#else
   SDL_WM_SetCaption(s_title, g_pAppTitle);// change caption just for drive 0 (leading)
-
+#endif
   FrameRefreshStatus(DRAW_LEDS | DRAW_BUTTON_DRIVES);
 
   return true;
@@ -996,7 +1003,7 @@ unsigned int DiskSetSnapshot(SS_CARD_DISK2 *pSS, unsigned int)
   for (unsigned int i = 0; i < 2; i++) {
     bool bImageError = false;
 
-    ZeroMemory(&g_aFloppyDisk[i], sizeof(Disk_t));
+    memset(&g_aFloppyDisk[i], 0, sizeof(Disk_t));
     if (pSS->Unit[i].szFileName[0] == 0x00)
       continue;
 

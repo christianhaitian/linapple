@@ -9,6 +9,15 @@ VERSION     := 2.3.0
 #Compiler and Linker
 CC          := g++
 
+# Build output (use make V=1 for full commands)
+ifeq ($(V),1)
+Q :=
+STATUS =
+else
+Q := @
+STATUS = @if [ -t 1 ]; then printf '\033[36m  %-8s\033[0m %s\n' "$(1)" "$(2)"; else printf '  %-8s %s\n' "$(1)" "$(2)"; fi
+endif
+
 # Where does this get installed
 PREFIX      ?= /usr/local
 DESTDIR     ?= $(PREFIX)
@@ -40,13 +49,21 @@ SYMEXT      := SYM
 
 BUILDDIR    := build/$(OBJDIR)
 TARGETDIR   := build/$(BINDIR)
+OSKPNG_HEADER := $(BUILDDIR)/osk_png.h
 
 #Flags, Libraries and Includes
 
+ifdef SDL2
+SDL_CONFIG ?= sdl2-config
+SDL_CFLAGS = $(shell $(SDL_CONFIG) --cflags)
+SDL_LIBS = $(shell $(SDL_CONFIG) --libs)
+SDL_LIBS += $(shell pkg-config SDL2_image --libs)
+else
 SDL_CONFIG ?= sdl-config
 SDL_CFLAGS = $(shell $(SDL_CONFIG) --cflags)
 SDL_LIBS = $(shell $(SDL_CONFIG) --libs)
 SDL_LIBS +=  $(shell pkg-config SDL_image --libs)
+endif
 
 CURL_CONFIG ?= curl-config
 CURL_CFLAGS = $(shell $(CURL_CONFIG) --cflags)
@@ -69,14 +86,21 @@ CFLAGS += "-DREGISTRY_WRITEABLE=1"
 endif
 
 CFLAGS += -DASSET_DIR=\"$(DATADIR)\" -DVERSIONSTRING=\"$(VERSION)\"
+ifdef SDL2
+CFLAGS += -DSDL2
+endif
 CFLAGS += $(SDL_CFLAGS)
 CFLAGS += $(CURL_CFLAGS)
 # Do not complain about XPMs
 CFLAGS += -Wno-write-strings
 
+ifdef SDL2
+LIB    := $(SDL_LIBS) $(CURL_LIBS) -lz -lzip -lGLESv2 -pthread
+else
 LIB    := $(SDL_LIBS) $(CURL_LIBS) -lz -lzip -pthread -lX11
-INC    := -I$(INCDIR) -I/usr/local/include
-INCDEP := -I$(INCDIR)
+endif
+INC    := -I$(INCDIR) -I$(BUILDDIR) -I/usr/local/include
+INCDEP := -I$(INCDIR) -I$(BUILDDIR)
 
 # Check if user has compiled the source
 define COMPILED
@@ -115,7 +139,11 @@ Installed-Size: $(SIZE)
 Maintainer: LinApple team <https://github.com/linappleii/linapple/issues>
 Architecture: $(ARCH)
 Version: $(VERSION)
+ifdef SDL2
+Depends: libzip-dev, libsdl2-dev, libsdl2-image-dev, libcurl4-openssl-dev, zlib1g-dev, imagemagick
+else
 Depends: libzip-dev, libsdl1.2-dev, libsdl-image1.2-dev, libcurl4-openssl-dev, zlib1g-dev, imagemagick
+endif
 Homepage: https://github.com/linappleii/linapple
 Description: A Linux emulator for Apple ][+, IIe and Enhanced //e with Mockingboard support
 endef
@@ -126,7 +154,8 @@ export CONTROL
 #-------------------------------------------------------------------------------
 SOURCES := $(shell find $(SRCDIR) -type f -name *.$(SRCEXT))
 OBJECTS := $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(SOURCES:.$(SRCEXT)=.$(OBJEXT)))
-SRCIMGS := $(foreach dir,$(RESDIR),$(wildcard $(dir)/*.$(IMGEXT)))
+#SRCIMGS := $(foreach dir,$(RESDIR),$(wildcard $(dir)/*.$(IMGEXT)))
+SRCIMGS := $(filter-out $(RESDIR)/osk.png,$(foreach dir,$(RESDIR),$(wildcard $(dir)/*.$(IMGEXT))))
 DSTIMGS := $(patsubst $(RESDIR)/%,$(BUILDDIR)/%,$(SRCIMGS:.$(IMGEXT)=.$(XPMEXT)))
 SRCSYMS := $(wildcard $(RESDIR)/*.$(SYMEXT))
 DSTSYMS := $(patsubst $(RESDIR)/%,$(TARGETDIR)/%,$(SRCSYMS))
@@ -170,10 +199,18 @@ distclean: clean
 $(TARGETDIR)/$(TARGET): $(OBJECTS)
 	$(CC) $(LFLAGS) -o $(TARGETDIR)/$(TARGET) $^ $(LIB)
 
+$(OSKPNG_HEADER): $(RESDIR)/osk.png res/embed_png.py
+	@mkdir -p $(dir $@)
+	$(call STATUS,RESOURCE,$<)
+	$(Q)python3 res/embed_png.py $< $@
+
+$(BUILDDIR)/OSK.$(OBJEXT): $(OSKPNG_HEADER)
+
 #Compile
 $(BUILDDIR)/%.$(OBJEXT): $(SRCDIR)/%.$(SRCEXT)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(INC) -c -o $@ $<
+	@printf '  CXX      %s\n' '$<'
+	$(Q)$(CC) $(CFLAGS) $(INC) -c -o $@ $<
 	@$(CC) $(CFLAGS) $(INCDEP) -MM $(SRCDIR)/$*.$(SRCEXT) > $(BUILDDIR)/$*.$(DEPEXT)
 	@cp -f $(BUILDDIR)/$*.$(DEPEXT) $(BUILDDIR)/$*.$(DEPEXT).tmp
 	@sed -e 's|.*:|$(BUILDDIR)/$*.$(OBJEXT):|' < $(BUILDDIR)/$*.$(DEPEXT).tmp > $(BUILDDIR)/$*.$(DEPEXT)

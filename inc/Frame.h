@@ -13,6 +13,13 @@ enum {
 #define SCREEN_WIDTH  560
 #define SCREEN_HEIGHT  384
 #define SCREEN_BPP  8
+
+#ifdef SDL2
+extern SDL_Window *sdl2window;
+void FramePresentGL(SDL_Surface *frame);
+void FrameShutdownGL(void);
+#endif
+
 extern SDL_Surface *screen;
 
 #define SHOW_CYCLES  15
@@ -34,6 +41,8 @@ void FrameRegisterClass();
 void FrameReleaseDC();
 
 void FrameReleaseVideoDC();
+
+void FrameSaveBMP(void);
 
 void DrawFrameWindow();  // draw it!
 void FrameDispatchMessage(SDL_Event *e); // replacement for FrameWndProc.

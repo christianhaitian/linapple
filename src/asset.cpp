@@ -19,8 +19,14 @@
 */
 
 #include <sys/param.h>
-#include <SDL.h>
-#include <SDL_image.h>
+
+#ifdef SDL2
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+#else
+#include <SDL/SDL.h>
+#include <SDL/SDL_image.h>
+#endif
 
 #include "asset.h"
 #include "stdafx.h"  // for Disk.h DiskInsert()
@@ -28,6 +34,7 @@
 
 #include "../res/font.xpm"
 #include "../res/icon.xpm"
+#include "../res/pm.xpm"
 #include "../build/obj/splash.xpm"
 
 #define ASSET_MASTER_DSK     "Master.dsk"
@@ -96,6 +103,11 @@ bool Asset_Init(void)
     return false;
   }
 
+  assets->pm = IMG_ReadXPMFromArray(pm_xpm);
+  if (NULL == assets->pm) {
+    return false;
+  }
+
   return true;
 }
 
@@ -117,6 +129,11 @@ void Asset_Quit(void)
       assets->splash = NULL;
     }
 
+    if (NULL != assets->pm) {
+      SDL_FreeSurface(assets->pm);
+      assets->pm = NULL;
+    }
+
     if (NULL != system_exedir) {
       SDL_free(system_exedir);
       system_exedir = NULL;
@@ -135,10 +152,10 @@ int Asset_FindMasterDisk(char *path_out)
   // TODO the last ditch paths are bunk -- look for better conventions.
 
   int err = 255;
-  const int count = 5;
+  const int count = 8;
   char *paths[count];
   char path[MAX_PATH+1];
-  
+
   // Allocate.
   for (int i=0; i<count; i++)
     paths[i] = (char *)SDL_malloc(sizeof(char[PATH_MAX+1]));
@@ -146,10 +163,13 @@ int Asset_FindMasterDisk(char *path_out)
   // Define search paths in precedence order.
   strcpy(paths[0], ".");
   strcpy(paths[1], "share/linapple"); // testing convenience
-  strcpy(paths[2], SDL_getenv("HOME"));
-  strcat(paths[2], "/.local/share/linapple");
-  strcpy(paths[3], "/usr/local/share/linapple");
-  strcpy(paths[4], "/usr/share/linapple");
+  strcpy(paths[2], "build/share/linapple"); // testing convenience
+  strcpy(paths[3], "../share/linapple"); // testing convenience
+  strcpy(paths[4], SDL_getenv("HOME"));
+  strcat(paths[4], "/.local/share/linapple");
+  strcpy(paths[5], "/usr/local/share/linapple");
+  strcpy(paths[6], "/usr/share/linapple");
+  strcpy(paths[7], "/opt/linapple"); // ArkOS, dArkOS
 
   for (auto p: paths) {
     sprintf(path, "%s/%s", p, ASSET_MASTER_DSK);

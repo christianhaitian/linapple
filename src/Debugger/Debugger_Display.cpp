@@ -240,7 +240,12 @@ void AllocateDebuggerMemDC(void)
     // character bitmap for IIe and enhanced
     SDL_Surface *tmp = IMG_ReadXPMFromArray(charset40_xpm);
     // convert format
+#ifdef SDL2
+//    g_hDebugCharset = SDL_ConvertSurfaceFormat(tmp, SDL_GetWindowPixelFormat(sdl2window), 0);
+    g_hDebugCharset = SDL_ConvertSurface(tmp, screen->format, 0);
+#else
     g_hDebugCharset = SDL_DisplayFormat(tmp);
+#endif
     SDL_FreeSurface(tmp);
 
 //    ZeroMemory(debugColors, sizeof(debugColors));
@@ -285,10 +290,12 @@ void StretchBltMemToFrameDC(void)
 
 	SDL_SoftStretch(g_hDebugScreen, &srect, g_origscreen, &drect);
 	SDL_BlitSurface(g_origscreen, NULL, screen, NULL);
-
-	SDL_Flip(screen);
-
-	pthread_mutex_unlock(&video_draw_mutex);
+#ifdef SDL2
+  FramePresentGL(screen);
+#else
+  SDL_Flip(screen);
+#endif
+  pthread_mutex_unlock(&video_draw_mutex);
 }
 
 // Font: Apple Text
@@ -2790,7 +2797,7 @@ void DrawSoftSwitches( int iSoftSwitch )
 void DrawSourceLine( int iSourceLine, RECT &rect )
 {
 	char sLine[ CONSOLE_WIDTH ];
-	ZeroMemory( sLine, CONSOLE_WIDTH );
+	memset( sLine, 0, CONSOLE_WIDTH );
 
 	if ((iSourceLine >=0) && (iSourceLine < g_AssemblerSourceBuffer.GetNumLines() ))
 	{

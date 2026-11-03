@@ -60,7 +60,10 @@ char *estrndup(const char *s, uint length) {
 }
 
 char *php_trim(char *c, int len) {
-  register int i;
+//  register int i;
+  // devinsmith
+  int i;
+
   int trimmed = 0;
   char mask[256];
   static char maskVal[] = " \n\r\t\v\0";
@@ -90,7 +93,8 @@ char *php_trim(char *c, int len) {
 }
 
 void RegConfPath(const char * filename) {
-  strncpy(confPath, filename, MAX_PATH);
+  strncpy(confPath, filename, MAX_PATH - 1);
+  confPath[MAX_PATH - 1] = '\0';
   printf("conf = %s\n", confPath);
 }
 

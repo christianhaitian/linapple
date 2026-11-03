@@ -38,6 +38,7 @@ By Mark Ormond.
 #include <cassert>
 #include <string>
 #include <vector>
+#include <cctype>
 #include <X11/Xlib.h>
 #include "Log.h"
 #include "MouseInterface.h"
@@ -57,14 +58,14 @@ By Mark Ormond.
 #include <getopt.h>
 
 #include "asset.h"
+#include "StartupChooser.h"
 
 #ifdef __APPLE__
 #include "AlertHooks.h"
 #endif
 
-#ifdef __APPLE__
-#include "AlertHooks.h"
-#endif
+// On-screen keyboard
+#include "OSK.h"
 
 // Satisfy modern compiler standards
 static char TITLE_APPLE_2_[] = TITLE_APPLE_2;
@@ -140,6 +141,14 @@ ULONG g_nPerfFreq = 0;
 static unsigned int g_uModeStepping_Cycles = 0;
 static bool g_uModeStepping_LastGetKey_ScrollLock = false;
 
+#ifdef SDL2
+extern Uint32 g_SoftwareRepeatNextTime;
+extern SDL_Keycode g_SoftwareRepeatKey;
+extern bool g_SoftwareRepeatExtended;
+extern void KeybQueueKeypress(int key, bool bASCII);
+extern bool JoyProcessKey(int key, bool extended, bool pressed, bool autorep);
+#endif
+
 void ContinueExecution()
 {
   const double fUsecPerSec = 1.e6;
@@ -179,6 +188,20 @@ void ContinueExecution()
 
   DiskUpdatePosition(uActualCyclesExecuted);
   JoyUpdatePosition();
+
+#ifdef SDL2
+  if (g_SoftwareRepeatKey != SDLK_UNKNOWN && g_nAppMode == MODE_RUNNING && !g_bFullSpeed) {
+    Uint32 now = SDL_GetTicks();
+    if (now >= g_SoftwareRepeatNextTime) {
+      // Re-fire the key down into joystick mapping / keyboard buffer matrices
+      if ((!JoyProcessKey(g_SoftwareRepeatKey, g_SoftwareRepeatExtended, true, 1)) && (g_nAppMode != MODE_LOGO)) {
+        KeybQueueKeypress(g_SoftwareRepeatKey, 0); // NOT_ASCII
+      }
+      g_SoftwareRepeatNextTime = now + 60; // Repeat frequency pace (ms)
+    }
+  }
+#endif
+
   // the next call does not present in current Applewin as on March 2012??
   VideoUpdateVbl(g_dwCyclesThisFrame);
   //
@@ -484,6 +507,9 @@ void LoadConfiguration()
     LOAD(TEXT("Joy0Index"), &joy1index);
     LOAD(TEXT("Joy1Index"), &joy2index);
 
+#ifdef SDL2
+    // SDL2 uses SDL_GAMECONTROLLERCONFIG and SDL_GAMECONTROLLERCONFIG_FILE.
+#else
     LOAD(TEXT("Joy0Button1"), &joy1button1);
     LOAD(TEXT("Joy0Button2"), &joy1button2);
     LOAD(TEXT("Joy1Button1"), &joy2button1);
@@ -498,15 +524,26 @@ void LoadConfiguration()
 
     LOAD(TEXT("JoyInvertX"), &joyXAxisInvert);
     LOAD(TEXT("JoyInvertY"), &joyYAxisInvert);
+#endif
   }
 
   if (joytype[0] == 1) {
+#ifdef SDL2
+    printf("Joystick 1 Index # = %i, Name = %s \nButton 1 = %i, Button 2 = %i \nAxis 0 = %i,Axis 1 = %i\n", joy1index,
+           SDL_JoystickNameForIndex(joy1index), joy1button1, joy1button2, joy1axis0, joy1axis1);
+#else
     printf("Joystick 1 Index # = %i, Name = %s \nButton 1 = %i, Button 2 = %i \nAxis 0 = %i,Axis 1 = %i\n", joy1index,
            SDL_JoystickName(joy1index), joy1button1, joy1button2, joy1axis0, joy1axis1);
+#endif
   }
   if (joytype[1] == 1) {
+#ifdef SDL2
+    printf("Joystick 2 Index # = %i, Name = %s \nButton 1 = %i \nAxis 0 = %i,Axis 1 = %i\n", joy2index,
+           SDL_JoystickNameForIndex(joy2index), joy2button1, joy2axis0, joy2axis1);
+#else
     printf("Joystick 2 Index # = %i, Name = %s \nButton 1 = %i \nAxis 0 = %i,Axis 1 = %i\n", joy2index,
            SDL_JoystickName(joy2index), joy2button1, joy2axis0, joy2axis1);
+#endif
   }
 
   // default: use keyboard language according to environment
@@ -581,11 +618,12 @@ void LoadConfiguration()
   if (registry) {
     LOAD(TEXT("Sound Emulation"), &soundtype);
   }
-  unsigned int dwSerialPort;
-  if (registry) {
-    LOAD(TEXT("Serial Port"), &dwSerialPort);
-  }
-  sg_SSC.SetSerialPort(dwSerialPort);
+  // colinleroy - Basic fix for serial emulation
+//  unsigned int dwSerialPort;
+//  if (registry) {
+//    LOAD(TEXT("Serial Port"), &dwSerialPort);
+//  }
+//  sg_SSC.SetSerialPort(dwSerialPort);
 
   if (registry) {
     LOAD(TEXT("Emulation Speed"), &g_dwSpeed);
@@ -748,7 +786,7 @@ void LoadConfiguration()
 
   if (registry) {
     if (RegLoadString(TEXT("Configuration"), TEXT(REGVALUE_SAVESTATE_FILENAME), 1, &szFilename, MAX_PATH)) {
-      Snapshot_SetFilename(szFilename);  // If not in Registry than default will be used
+      Snapshot_SetFilename(szFilename);  // If not in Registry then default will be used
       free(szFilename);
       szFilename = NULL;
     }
@@ -998,17 +1036,22 @@ void PrintHelp()
          "\n"
          "LinApple is an emulator for Apple ][, Apple ][+, Apple //e, and Enhanced Apple //e computers.\n"
          "\n"
-         "  -h|--help      show this help message\n"
-         "  --conf <file>  use <file> instead of any default config files\n"
-         "  --d1 <file>    insert disk image into first drive\n"
-         "  --d2 <file>    insert disk image into second drive\n"
-         "  -b|--autoboot  boot/reset at startup\n"
-         "  -f             run fullscreen\n"
-         "  -l             write log to 'AppleWin.log'\n"
+         "  -h | --help       show this help message\n"
+         "  --conf <file>     use <file> instead of any default config files\n"
+         "  --d1 <file>       insert disk image into first drive\n"
+         "  --d2 <file>       insert disk image into second drive\n"
+         "  --hd1 <file>      mount hard disk image as first HDD\n"
+         "  --hd2 <file>      mount hard disk image as second HDD\n"
+         "  --ser <file>      serial port to use and map on slot2\n"
+         "  --state <file>    use savestate <file> for Alt+F11 (save) and Alt+F10 (load)\n"
+         "  --chooser <path>  set path to launch and use ez-image browser\n"
+         "  -b | --autoboot   boot/reset at startup\n"
+         "  -f                run fullscreen\n"
+         "  -l                write log to 'AppleWin.log'\n"
          #ifdef RAMWORKS
-         "  -r PAGES       allocate PAGES to Ramworks (1-127)\n"
+         "  -r PAGES          allocate PAGES to Ramworks (1-127)\n"
          #endif
-         "  --benchmark    benchmark and quit\n"
+         "  --benchmark       benchmark and quit\n"
          "\n");
 }
 
@@ -1021,22 +1064,39 @@ int main(int argc, char *argv[])
   LPSTR szConfigurationFile = NULL;
   LPSTR szImageName_drive1 = NULL;
   LPSTR szImageName_drive2 = NULL;
+  LPSTR szImageName_hd1 = NULL;
+  LPSTR szImageName_hd2 = NULL;
+  const char* szChooserPath = NULL;
+  bool bStartupChooserQuit = false;
   LPSTR szSnapshotFile = NULL;
+// colinleroy - Basic fix for serial emulation
+  LPSTR szSerialFile = NULL;
 
   int opt;
-  int optind = 0;
+//  int optind = 0;
+  int longindex = 0;
   const char *optname;
   static struct option longopts[] = {{"autoboot", 0,                 0, 0},
                                      {"conf",     required_argument, 0, 0},
                                      {"d1",       required_argument, 0, 0},
                                      {"d2",       required_argument, 0, 0},
+                                     {"hd1",      required_argument, 0, 0},
+                                     {"hd2",      required_argument, 0, 0},
+                                     {"ser",      required_argument, 0, 0},
                                      {"help",     0,                 0, 0},
                                      {"state",    required_argument, 0, 0},
+                                     {"benchmark",no_argument,       0, 0},
+                                     {"chooser",  required_argument, 0, 0},
                                      {0,          0,                 0, 0}};
 
+#ifdef SDL2
+  // No XInitThreads
+#else
   XInitThreads();
+#endif
 
-  while ((opt = getopt_long(argc, argv, "1:2:abfhlr:", longopts, &optind)) != -1) {
+//  while ((opt = getopt_long(argc, argv, "1:2:abfhlr:", longopts, &optind)) != -1) {
+  while ((opt = getopt_long(argc, argv, "1:2:abfhlr:", longopts, &longindex)) != -1) {
     switch (opt) {
       case '1':
         szImageName_drive1 = optarg;
@@ -1074,22 +1134,32 @@ int main(int argc, char *argv[])
       #endif
 
       case 0:
-        optname = longopts[optind].name;
+//        optname = longopts[optind].name;
+        optname = longopts[longindex].name;
         if (!strcmp(optname, "autoboot")) {
           bBoot = true;
         } else if (!strcmp(optname, "benchmark")) {
           bBenchMark = true;
+        } else if (!strcmp(optname, "chooser")) {
+          szChooserPath = optarg;
         } else if (!strcmp(optname, "conf")) {
           szConfigurationFile = optarg;
         } else if (!strcmp(optname, "d1")) {
           szImageName_drive1 = optarg;
         } else if (!strcmp(optname, "d2")) {
           szImageName_drive2 = optarg;
+        } else if (!strcmp(optname, "hd1")) {
+          szImageName_hd1 = optarg;
+        } else if (!strcmp(optname, "hd2")) {
+          szImageName_hd2 = optarg;
         } else if (!strcmp(optname, "help")) {
           PrintHelp();
           return 0;
         } else if (!strcmp(optname, "state")) {
           szSnapshotFile = optarg;
+        } else if (!strcmp(optname, "ser")) {
+          // colinleroy - Basic fix for serial emulation
+          szSerialFile = optarg;
         } else {
           printf("Unknown option '%s'.\n\n", optname);
           PrintHelp();
@@ -1101,6 +1171,109 @@ int main(int argc, char *argv[])
         printf("Unknown option '%s'.\n\n", optarg);
         PrintHelp();
         return 255;
+    }
+  }
+
+  // Allow single disk image to be autobooted by passing just its filename.
+  const int positionalCount = argc - optind;
+  if (positionalCount > 1) {
+    fprintf(stderr, "Error: specify only one disk image.\n"
+                    "Use --d1 and --d2 to mount multiple floppy disks.\n");
+    return 255;
+  }
+
+  if (positionalCount == 1) {
+    const char *filename = argv[optind];
+
+    // Do not silently override an explicitly selected drive or HDD image.
+    if (szImageName_drive1 || szImageName_drive2 || szImageName_hd1 || szImageName_hd2) {
+      fprintf(stderr, "Error: quick loading cannot be combined "
+                      "with --d1, --d2, --hd1, or --hd2.\n");
+      return 255;
+    }
+
+    std::string extension;
+    const std::string imageName(filename);
+    const std::string::size_type dot = imageName.find_last_of('.');
+    if (dot != std::string::npos)
+      extension = imageName.substr(dot);
+
+    // Compare the extension without regard to case.
+    for (std::string::size_type i = 0; i < extension.size(); ++i)
+      extension[i] = (char)tolower((unsigned char)extension[i]);
+
+    // These extensions can describe either floppy or hard disk images.
+    // ZIP and GZ archives use the existing floppy-image loading path.
+    if (extension == ".po"   ||
+        extension == ".2mg"  ||
+        extension == ".2img") {
+      bool targetIsHardDisk = true;
+      FILE* fimg = fopen(filename, "rb");
+      if (fimg) {
+        unsigned char header[32];
+        size_t readBytes = fread(header, 1, 32, fimg);
+        fclose(fimg);
+
+        if (readBytes >= 32 && memcmp(header, "2IMG", 4) == 0) {
+          // Unpack Format ID (offset 12) and ProDOS Block Count (offset 20)
+          unsigned int imageFormat = header[12] | (header[13] << 8) | (header[14] << 16) | (header[15] << 24);
+          unsigned int blockCount  = header[20] | (header[21] << 8) | (header[22] << 16) | (header[23] << 24);
+
+          if (imageFormat == 0 || imageFormat == 2) {
+            targetIsHardDisk = false; // 5.25" DOS 3.3 or Nibble floppy
+          } else if (imageFormat == 1) {
+            targetIsHardDisk = (blockCount >= 1600); // ProDOS order 5.25" floppy (280 blocks) or 800KB 3.5" disk (1600 blocks)
+          }
+        } else {
+          struct stat st;
+          if (stat(filename, &st) == 0) {
+            targetIsHardDisk = (st.st_size > 143400); // A standard 5.25" floppy image is never more than 143,360 bytes
+          }
+        }
+      }
+
+      if (targetIsHardDisk) {
+        szImageName_hd1 = (LPSTR)filename;
+      } else {
+        szImageName_drive1 = (LPSTR)filename;
+      }
+    }
+    else if (extension == ".hdv") {
+      szImageName_hd1 = (LPSTR)filename;
+    } else if (extension == ".dsk" ||
+               extension == ".do"  ||
+               extension == ".bin" ||
+               extension == ".nib" ||
+               extension == ".woz" ||
+               extension == ".zip" ||
+               extension == ".gz") {
+      if (extension == ".zip") { fprintf(stderr, "Quick mode will assume ZIP archives contain floppy images\n"); }
+      if (extension == ".gz") { fprintf(stderr, "Quick mode will assume GZ archives contain floppy images\n"); }
+      szImageName_drive1 = (LPSTR)filename;
+    } else {
+      fprintf(stderr, "Error: unsupported disk image or file not found: '%s'.\n", filename);
+      fprintf(stderr, "Supported quick floppy extensions: .dsk, .do, .bin, .nib, .woz, .po, .2mg, .2img, .zip, .gz\n");
+      fprintf(stderr, "Supported quick hard disk extension: .hdv, .po, .2mg, .2img\n");
+      return 255;
+    }
+
+    // autoboot
+    bBoot = true;
+  }
+
+  std::string chooserDirectory;
+  if (szChooserPath) {
+    struct stat chooserStat;
+    if (stat(szChooserPath, &chooserStat) != 0 ||
+        (!S_ISDIR(chooserStat.st_mode) && !S_ISREG(chooserStat.st_mode))) {
+      fprintf(stderr, "Error: --chooser path does not exist or is not a regular file/directory: '%s'.\n", szChooserPath);
+      return 255;
+    }
+    if (S_ISDIR(chooserStat.st_mode)) chooserDirectory = szChooserPath;
+    else {
+      std::string filePath(szChooserPath);
+      std::string::size_type slash = filePath.find_last_of('/');
+      chooserDirectory = slash == std::string::npos ? "." : (slash == 0 ? "/" : filePath.substr(0, slash));
     }
   }
 
@@ -1124,9 +1297,13 @@ int main(int argc, char *argv[])
   } // init SDL subsystems, set icon
 
   // add suport spanish special keys
+#ifdef SDL2
+  // SDL2 lacks unicode support
+#else
   if (SDL_EnableUNICODE(1)) {
     return 1;
   }
+#endif
 
   // CURL routines
   curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -1175,11 +1352,32 @@ int main(int argc, char *argv[])
         break;
       }
     }
+    // This mounts a hard disk as the first HDD
+    if (szImageName_hd1) {
+      if (!HD_InsertDisk2(0, szImageName_hd1)) {
+        LOG("Failed to mount %s as hard disk image.", szImageName_hd1);
+        break;
+      }
+      hddenabled = true;
+    }
+
+    // Mount a hard disk as the second HDD
+    if (szImageName_hd2) {
+      if (!HD_InsertDisk2(1, szImageName_hd2)) {
+        LOG("Failed to mount %s as second hard disk image.", szImageName_hd2);
+        break;
+      }
+      hddenabled = true;
+    }
 
     FrameCreateWindow();
 
     if (!DSInit()) {
       soundtype = SOUND_NONE;    // Direct Sound and Stuff
+    }
+    // colinleroy - Basic fix for serial emulation
+    if (szSerialFile) {
+      sg_SSC.SetSerialPort(szSerialFile);
     }
 
     MB_Initialize();  // Mocking board
@@ -1201,7 +1399,7 @@ int main(int argc, char *argv[])
     }
 
     //Automatically boot from disk if specified on the command line
-    if (bBoot) {
+    if (bBoot && !szChooserPath) {
       setAutoBoot();
     }
 
@@ -1221,7 +1419,14 @@ int main(int argc, char *argv[])
     if (bBenchMark) {
       VideoBenchmark(); // start VideoBenchmark and exit
     } else {
-      EnterMessageLoop();  // else we just start game
+      if (szChooserPath) {
+        if (!ChooserRun(chooserDirectory))
+          bStartupChooserQuit = true;
+        else
+          setAutoBoot();
+      }
+      if (!bStartupChooserQuit)
+        EnterMessageLoop();  // else we just start game
     }
 
     Snapshot_Shutdown();
@@ -1236,6 +1441,7 @@ int main(int argc, char *argv[])
     CpuDestroy();
     SpkrDestroy();
     VideoDestroy();
+    OSK_Cleanup();
     MemDestroy();
     MB_Destroy();
     MB_Reset();
@@ -1260,4 +1466,3 @@ int main(int argc, char *argv[])
   printf("Linapple: successfully exited!\n");
   return 0;
 }
-
